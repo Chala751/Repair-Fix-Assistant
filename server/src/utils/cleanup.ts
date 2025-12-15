@@ -1,4 +1,4 @@
-export function cleanIFixitJSON(raw: any) {
+export function cleanIFixitJSON(raw: any[]) {
   return raw.map((item: any) => ({
     title: item.display_title,
     text: item.text,
