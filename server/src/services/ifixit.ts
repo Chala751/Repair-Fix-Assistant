@@ -1,6 +1,7 @@
 import fetch from "node-fetch";
 
-interface IFixitDevice {
+
+interface IFixitGuide {
   title: string;
   display_title: string;
   url: string;
@@ -13,54 +14,59 @@ interface IFixitGuideStep {
   images?: string[];
 }
 
+interface IFixitSearchResponse {
+  results?: any[];
+}
 
-function deviceSlugFromUrl(url: string) {
-  const parts = url.split("/Device/");
-  return parts[1] || "";
+interface IFixitGuideResponse {
+  steps?: any[];
 }
 
 
 function extractDeviceNameFallback(query: string): string {
-  const words = query.split(" ");
-  return words.slice(0, 2).join(" "); // e.g., "iPhone 12"
+  const words = query.trim().split(/\s+/);
+  return words.slice(0, 2).join(" "); 
 }
 
 
-async function searchDevice(query: string): Promise<IFixitDevice[]> {
-  const url = `https://www.ifixit.com/api/2.0/search/${encodeURIComponent(query)}?filter=device`;
-  const res = await fetch(url);
-  const data = (await res.json()) as { results?: any[] };
-  return (data.results || []).map((d) => ({
-    title: d.title || "Unknown",
-    display_title: d.title || "Unknown",
-    url: d.url || "",
-    wikiid: d.wikiid || 0,
-  }));
-}
+async function searchGuides(query: string): Promise<IFixitGuide[]> {
+  const url = `https://www.ifixit.com/api/2.0/search/${encodeURIComponent(
+    query
+  )}?filter=guide&limit=10`;
 
-
-async function listGuides(slug: string): Promise<IFixitDevice[]> {
-  const url = `https://www.ifixit.com/api/2.0/wikis/CATEGORY/${slug}`;
   const res = await fetch(url);
-  const data = (await res.json()) as { results?: any[] };
-  return (data.results || []).map((g) => ({
-    title: g.title || "Unknown Guide",
-    display_title: g.title || "Unknown Guide",
-    url: g.url || "",
-    wikiid: g.wikiid || 0,
-  }));
+  const data = (await res.json()) as IFixitSearchResponse;
+
+  return (data.results || [])
+    .filter((r) => r?.dataType === "guide")
+    .map((g) => ({
+      title: g.title || "Unknown Guide",
+      display_title: g.title || "Unknown Guide",
+      url: g.url || "",
+      wikiid: g.guideid || 0,
+    }));
 }
 
 
 async function getGuide(guideId: number): Promise<IFixitGuideStep[]> {
   const url = `https://www.ifixit.com/api/2.0/guides/${guideId}`;
   const res = await fetch(url);
-  const data = (await res.json()) as { steps?: any[] };
-  return data.steps?.map((s) => ({
-    title: s.title,
-    instruction: s.instruction,
-    images: s.images || [],
-  })) || [];
+  const data = (await res.json()) as IFixitGuideResponse;
+
+  return (data.steps || []).map((step) => {
+    const instruction =
+      (step.lines && step.lines.map((l: any) => l.text).join("\n")) ||
+      step.summary ||
+      "Follow the images carefully for this step.";
+
+    return {
+      title: step.title || "Step",
+      instruction: instruction.trim(),
+      images: (step.media?.images || []).map(
+        (img: any) => img.standard || img.large
+      ),
+    };
+  });
 }
 
 
@@ -70,45 +76,32 @@ export async function* repairAgent(userQuery: string) {
   const deviceName = extractDeviceNameFallback(userQuery);
   yield `🛠 Device detected: ${deviceName}\n`;
 
-  yield "🔍 Searching iFixit for your device...\n";
-  const devices = await searchDevice(deviceName);
+  yield "🔍 Searching for repair guides...\n";
+  const guides = await searchGuides(userQuery);
 
-  if (!devices.length) {
-    yield "⚠️ No official guides found. Searching community solutions...\n";
-    yield "🔗 [Fallback search not implemented yet]\n";
-    return;
-  }
-
-  const device = devices[0];
-  yield `✅ Found device: ${device.display_title}\n`;
-
-  const slug = deviceSlugFromUrl(device.url);
-  yield `🔍 Searching guides for device slug: ${slug}\n`;
-
-  const guides = await listGuides(slug);
   if (!guides.length) {
-    yield "⚠️ No repair guides available for this device.\n";
+    yield "⚠️ No repair guides available for this query.\n";
     return;
   }
 
-  // pick the guide that best matches the user query
-  const guide = guides.find((g) =>
-    g.display_title.toLowerCase().includes(userQuery.toLowerCase())
-  ) || guides[0];
-
-  if (!guide || !guide.wikiid) {
-    yield "⚠️ Could not find a suitable repair guide.\n";
-    return;
-  }
-
+  const guide = guides[0];
   yield `🔧 Loading repair guide: ${guide.display_title}\n`;
 
   const steps = await getGuide(guide.wikiid);
-  for (const step of steps) {
-    let stepText = `**${step.title}**\n${step.instruction}\n`;
+
+  for (let i = 0; i < steps.length; i++) {
+    const step = steps[i];
+
+    let stepText = `### Step ${i + 1}: ${step.title}\n`;
+    stepText += `${step.instruction}\n`;
+
     if (step.images?.length) {
-      stepText += step.images.map((img) => `![image](${img})`).join("\n") + "\n";
+      stepText += step.images
+        .map((img) => `![image](${img})`)
+        .join("\n");
+      stepText += "\n";
     }
+
     yield stepText;
   }
 
