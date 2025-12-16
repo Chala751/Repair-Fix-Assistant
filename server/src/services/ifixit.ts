@@ -44,9 +44,18 @@ async function searchGuides(query: string): Promise<IFixitGuide[]> {
       display_title: g.title || "Unknown Guide",
       url: g.url || "",
       wikiid: g.guideid || 0,
-    }));
+    }))
+    .filter((g) => g.wikiid !== 0);
 }
 
+
+function collectImagesFromMedia(media: any): string[] {
+  const images: string[] = [];
+  media?.images?.forEach((img: any) => {
+    if (img.guid) images.push(`https://guide-images.cdn.ifixit.com/igi/${img.guid}.huge`);
+  });
+  return images;
+}
 
 async function getGuide(guideId: number): Promise<IFixitGuideStep[]> {
   const url = `https://www.ifixit.com/api/2.0/guides/${guideId}`;
@@ -54,17 +63,51 @@ async function getGuide(guideId: number): Promise<IFixitGuideStep[]> {
   const data = (await res.json()) as IFixitGuideResponse;
 
   return (data.steps || []).map((step) => {
+    let instructionParts: string[] = [];
+
+    
+    if (step.lines) {
+      instructionParts.push(...step.lines.map((l: any) => l.text));
+    }
+
+   
+    if (step.tasks) {
+      step.tasks.forEach((task: any) => {
+        if (task.title) instructionParts.push(task.title);
+        if (task.body) instructionParts.push(task.body);
+
+        
+        task.lines?.forEach((line: any) => {
+          if (line.text) instructionParts.push(line.text);
+        });
+      });
+    }
+
     const instruction =
-      (step.lines && step.lines.map((l: any) => l.text).join("\n")) ||
-      step.summary ||
-      "Follow the images carefully for this step.";
+      instructionParts.join("\n") || step.summary || "Follow the images carefully for this step.";
+
+    // ----- Collect images -----
+    let images: string[] = [];
+    images.push(...collectImagesFromMedia(step.media));
+
+    step.lines?.forEach((line: any) => {
+      images.push(...collectImagesFromMedia(line.media));
+    });
+
+    step.tasks?.forEach((task: any) => {
+      images.push(...collectImagesFromMedia(task.media));
+      task.lines?.forEach((line: any) => {
+        images.push(...collectImagesFromMedia(line.media));
+      });
+    });
+
+  
+    images = Array.from(new Set(images));
 
     return {
       title: step.title || "Step",
       instruction: instruction.trim(),
-      images: (step.media?.images || []).map(
-        (img: any) => img.standard || img.large
-      ),
+      images,
     };
   });
 }
@@ -105,5 +148,5 @@ export async function* repairAgent(userQuery: string) {
     yield stepText;
   }
 
-  yield "✅ Repair guide completed!\n";
+  yield " Repair guide completed!\n";
 }
