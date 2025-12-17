@@ -14,7 +14,7 @@ router.post("/stream", async (req, res) => {
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
 
-  // Simulate streaming token-by-token
+  
   const generator = repairAgent(query);
 
   for await (const chunk of generator) {

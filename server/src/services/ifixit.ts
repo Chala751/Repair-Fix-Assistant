@@ -123,7 +123,7 @@ export async function* repairAgent(userQuery: string) {
   const guides = await searchGuides(userQuery);
 
   if (!guides.length) {
-    yield "⚠️ No repair guides available for this query.\n";
+    yield "No repair guides available for this query.\n";
     return;
   }
 
